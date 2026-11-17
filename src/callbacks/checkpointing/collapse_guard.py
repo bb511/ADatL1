@@ -23,9 +23,20 @@ as a fallback and moved to the monitored filename at the end of training, and th
 report says so (status ``no_non_collapsed_epoch``). Stages 1-3 then still run, and
 stage 3 rejects the run through its own collapse rule.
 
+Minimum training length: with ``min_trained_epochs = N`` an epoch can become the
+checkpoint (or the collapsed fallback) only once the model has trained at least N
+epochs, i.e. from the 0-based epoch index N - 1 on. Earlier epochs are validated,
+logged and recorded in the report as usual, but never saved. The rule exists
+because ``val/loss_total`` can be lowest after the very first epoch, before the MI
+term has built up (Pareto-Front-261015: 6 of 18 runs selected epoch 0). If the run
+is configured shorter than N epochs (``trainer.max_epochs < N``, e.g. the 3-epoch
+local smoke run of scripts/physics/runae.sh), the minimum is clamped to
+``max_epochs`` -- only the final epoch is eligible -- with a warning, and the
+report records both the configured and the effective minimum.
+
 Files next to the checkpoint (``<name>`` = ``filename``, e.g. ``loss_total``):
 
-    <name>.ckpt             best epoch with H(L) >= minimum (or the fallback)
+    <name>.ckpt             best eligible epoch with H(L) >= minimum (or the fallback)
     <name>_collapsed.ckpt   fallback; exists only while no epoch has qualified
     <name>_guard.json       per-epoch history and the final decision
 
@@ -63,9 +74,11 @@ CODE_COUNT_METRIC = "val/latent_observed_code_count"
 
 STATUS_OK = "ok"
 STATUS_FALLBACK = "no_non_collapsed_epoch"
+STATUS_MIN_EPOCH_NOT_REACHED = "min_trained_epochs_not_reached"
 STATUS_NO_CHECKPOINT = "no_checkpoint"
 
-REPORT_SCHEMA_VERSION = 1
+# 2: minimum training length (guard.min_trained_epochs*, history[].before_min_epoch).
+REPORT_SCHEMA_VERSION = 2
 
 
 def joint_code_entropy_bits(code_counts: Mapping[Any, int]) -> float:
@@ -113,6 +126,10 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
         entropy of the normal validation split is at least this many bits. The
         default 0.05 bits blocks full collapse only (one code for ~99.5% of events);
         stage 3 still applies its own, stricter feasibility rule afterwards.
+    :param min_trained_epochs: An epoch is eligible only when the model has trained
+        at least this many epochs, i.e. its 0-based index is >= min_trained_epochs
+        - 1. 0 (default) and 1 allow every epoch. Clamped to ``trainer.max_epochs``
+        when the run is configured shorter.
     :param dataset: Name of the validation dataloader the codes are read from.
     :param latent_code_key: Key of the hard codes in the validation_step output.
     :param log_entropy: Log ``val/latent_joint_code_entropy_bits`` and
@@ -127,6 +144,7 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
         self,
         *args: Any,
         min_joint_code_entropy_bits: float = 0.05,
+        min_trained_epochs: int = 0,
         dataset: str = "normal",
         latent_code_key: str = LATENT_CODE_KEY,
         log_entropy: bool = True,
@@ -159,8 +177,17 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
             raise ValueError(
                 "min_joint_code_entropy_bits must be a finite, non-negative number."
             )
+        if (
+            isinstance(min_trained_epochs, bool)
+            or not isinstance(min_trained_epochs, (int, np.integer))
+            or min_trained_epochs < 0
+        ):
+            raise ValueError("min_trained_epochs must be a non-negative integer.")
 
         self.min_joint_code_entropy_bits = minimum
+        self.min_trained_epochs = int(min_trained_epochs)
+        # min(min_trained_epochs, trainer.max_epochs); set in setup() for a fit.
+        self.min_trained_epochs_effective = self.min_trained_epochs
         self.dataset = str(dataset)
         self.latent_code_key = str(latent_code_key)
         self.log_entropy = bool(log_entropy)
@@ -192,6 +219,62 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
     @property
     def report_path(self) -> Path:
         return Path(self.dirpath) / f"{self.filename}_guard.json"
+
+    # ------------------------------------------------------------------
+    # Minimum training length
+    # ------------------------------------------------------------------
+    @property
+    def first_eligible_epoch(self) -> int:
+        """0-based index of the first epoch that may be saved."""
+        return max(self.min_trained_epochs_effective - 1, 0)
+
+    def _before_min_epoch(self, epoch: int) -> bool:
+        return int(epoch) < self.first_eligible_epoch
+
+    def setup(self, trainer, pl_module, stage: str) -> None:
+        super().setup(trainer, pl_module, stage)
+        if stage != "fit":
+            return
+        effective = self.min_trained_epochs
+        max_epochs = trainer.max_epochs
+        # max_epochs None or -1 means "until max_steps/max_time": nothing to clamp to.
+        if max_epochs is not None and max_epochs > 0 and max_epochs < effective:
+            log.warning(
+                f"[min-epoch guard] min_trained_epochs={self.min_trained_epochs} but "
+                f"trainer.max_epochs={max_epochs}; clamped to {max_epochs}, so only "
+                f"epoch {max_epochs - 1} (the last one) may become "
+                f"{self.checkpoint_path.name}. Fine for a smoke run, not for a study."
+            )
+            effective = int(max_epochs)
+        self.min_trained_epochs_effective = effective
+        if effective > 1:
+            log.info(
+                f"[min-epoch guard] {self.checkpoint_path.name} is saved only from epoch "
+                f"{self.first_eligible_epoch} on (0-based), i.e. after >= {effective} "
+                "trained epochs."
+            )
+
+    def on_train_start(self, trainer, pl_module) -> None:
+        super().on_train_start(trainer, pl_module)
+        # A resumed run may carry a selection made under a smaller (clamped)
+        # minimum, e.g. a 3-epoch run resumed with max_epochs=200. It would keep
+        # winning against every later epoch, so drop it.
+        if self.selected is not None and self._before_min_epoch(self.selected["epoch"]):
+            log.warning(
+                f"[min-epoch guard] the restored selection (epoch "
+                f"{self.selected['epoch']}) is before the first eligible epoch "
+                f"{self.first_eligible_epoch}; discarding it."
+            )
+            self.best_k_models = {}
+            self.kth_best_model_path = ""
+            self.kth_value = torch.tensor(math.inf if self.mode == "min" else -math.inf)
+            self.best_model_score = None
+            self.best_model_path = ""
+            self.selected = None
+            if trainer.is_global_zero and self.checkpoint_path.exists():
+                self.checkpoint_path.unlink()
+        if self.fallback is not None and self._before_min_epoch(self.fallback["epoch"]):
+            self._drop_fallback(trainer)
 
     # ------------------------------------------------------------------
     # Code statistics during fit-time validation
@@ -256,6 +339,7 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
             "observed_code_count": int(len(self._code_counts)),
             "n_events": int(self._n_events),
             "collapsed": bool(self._epoch_collapsed),
+            "before_min_epoch": self._before_min_epoch(trainer.current_epoch),
             "saved": False,
         }
         self.history.append(self._pending_record)
@@ -278,8 +362,9 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
     # Checkpoint decision
     # ------------------------------------------------------------------
     def check_monitor_top_k(self, trainer, current: Optional[torch.Tensor] = None) -> bool:
-        """A collapsed epoch never enters the top-k, whatever its monitored value."""
-        if self._epoch_collapsed:
+        """A collapsed epoch, or one before the minimum training length, never
+        enters the top-k, whatever its monitored value."""
+        if self._epoch_collapsed or self._before_min_epoch(trainer.current_epoch):
             return False
         return super().check_monitor_top_k(trainer, current)
 
@@ -297,11 +382,13 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
         current = trainer.callback_metrics.get(self.monitor)
         record["monitor_value"] = None if current is None else float(current)
 
-        # check_monitor_top_k refuses a collapsed epoch; _update_best_and_save
-        # marks the record as selected before the file is written.
+        # check_monitor_top_k refuses a collapsed or too-early epoch;
+        # _update_best_and_save marks the record as selected before the file is
+        # written.
         super().on_validation_end(trainer, pl_module)
 
-        if not record["saved"] and record["collapsed"]:
+        # Too early: neither the checkpoint nor the collapsed fallback.
+        if not record["saved"] and record["collapsed"] and not record["before_min_epoch"]:
             log.info(
                 f"[collapse guard] epoch {record['epoch']}: H(L) = "
                 f"{record['joint_code_entropy_bits']:.4f} bits < "
@@ -366,11 +453,22 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
             self.selected = {**self.fallback, "path": str(self.checkpoint_path), "fallback": True}
             self.fallback = None
             log.warning(
-                f"[collapse guard] every validation epoch had H(L) < "
+                f"[collapse guard] every validation epoch from epoch "
+                f"{self.first_eligible_epoch} on had H(L) < "
                 f"{self.min_joint_code_entropy_bits} bits. {self.checkpoint_path.name} "
                 f"holds the best collapsed epoch {self.selected['epoch']} "
                 f"({self.monitor} = {self.selected['monitor_value']}); status "
                 f"'{STATUS_FALLBACK}' in {self.report_path.name}."
+            )
+        elif all(record.get("before_min_epoch", False) for record in self.history):
+            # Training stopped (max_steps, max_time, early stopping, ...) before
+            # the first eligible epoch was validated.
+            self.status = STATUS_MIN_EPOCH_NOT_REACHED
+            log.warning(
+                f"[min-epoch guard] training ended after epoch "
+                f"{self.history[-1]['epoch']}, before the first eligible epoch "
+                f"{self.first_eligible_epoch}; no {self.checkpoint_path.name} was "
+                f"written (status '{STATUS_MIN_EPOCH_NOT_REACHED}')."
             )
         else:
             self.status = STATUS_NO_CHECKPOINT
@@ -385,7 +483,9 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
                 f"{self.selected['epoch']}, {self.monitor} = "
                 f"{self.selected['monitor_value']}, H(L) = "
                 f"{self.selected['joint_code_entropy_bits']:.4f} bits; "
-                f"{self.n_collapsed_epochs} of {len(self.history)} epochs were collapsed."
+                f"{self.n_collapsed_epochs} of {len(self.history)} epochs were collapsed, "
+                f"{self.n_epochs_before_minimum} were before the first eligible epoch "
+                f"{self.first_eligible_epoch}."
             )
         if trainer.is_global_zero:
             self.write_report()
@@ -393,6 +493,10 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
     @property
     def n_collapsed_epochs(self) -> int:
         return int(sum(1 for record in self.history if record["collapsed"]))
+
+    @property
+    def n_epochs_before_minimum(self) -> int:
+        return int(sum(1 for record in self.history if record.get("before_min_epoch")))
 
     def report(self) -> dict[str, Any]:
         collapsed = [record["epoch"] for record in self.history if record["collapsed"]]
@@ -406,13 +510,20 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
                 "representation": "hard evaluation latent codes",
                 "dataset": self.dataset,
                 "min_joint_code_entropy_bits": self.min_joint_code_entropy_bits,
-                "rule": "an epoch is eligible iff joint_code_entropy_bits >= minimum",
+                "min_trained_epochs": self.min_trained_epochs,
+                "min_trained_epochs_effective": self.min_trained_epochs_effective,
+                "first_eligible_epoch": self.first_eligible_epoch,
+                "rule": (
+                    "an epoch is eligible iff joint_code_entropy_bits >= minimum and "
+                    "epoch (0-based) >= first_eligible_epoch"
+                ),
             },
             "status": self.status,
             "selected": self.selected,
             "n_validation_epochs": len(self.history),
             "n_collapsed_epochs": len(collapsed),
             "first_collapsed_epoch": collapsed[0] if collapsed else None,
+            "n_epochs_before_min_epoch": self.n_epochs_before_minimum,
             "history": self.history,
         }
 
@@ -431,6 +542,9 @@ class CollapseGuardedModelCheckpoint(ModelCheckpoint):
         state = super().state_dict()
         state["collapse_guard"] = {
             "min_joint_code_entropy_bits": self.min_joint_code_entropy_bits,
+            # Informational; a resume uses the configured value (see on_train_start).
+            "min_trained_epochs": self.min_trained_epochs,
+            "min_trained_epochs_effective": self.min_trained_epochs_effective,
             "history": list(self.history),
             "selected": self.selected,
             "fallback": self.fallback,

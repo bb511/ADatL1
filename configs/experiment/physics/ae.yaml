@@ -97,7 +97,8 @@ callbacks:
 
   # Keep the epoch with the smallest complete-epoch validation objective on the
   # normal validation split: loss_reco + mi_gamma * loss_mi, among the epochs
-  # whose latent has NOT fully collapsed. A collapsing latent lowers the MI term
+  # after the minimum training length (min_trained_epochs below) whose latent
+  # has NOT fully collapsed. A collapsing latent lowers the MI term
   # and can therefore look like the best epoch (Pareto-Front-261002: the selected
   # epochs of gamma 1.0 / 50 bins and 0.9 / 50 bins had H(L) = 0.0000 and 0.0025
   # bits). The guard measures the joint entropy of the hard codes on normal
@@ -111,6 +112,14 @@ callbacks:
     # Full collapse only (one code for ~99.5% of events). Stage 3 still applies
     # pareto_study.collapse_constraint (>= 1 bit, >= 0.5 x gamma-0) afterwards.
     min_joint_code_entropy_bits: 0.05
+    # Save only after >= 15 trained epochs, i.e. from 0-based epoch 14 on.
+    # val/loss_total can be lowest right after epoch 0, before the MI term has
+    # built up (Pareto-Front-261015: 6 of 18 runs selected epoch 0). Earlier
+    # epochs are still validated and logged, but are neither the checkpoint nor
+    # the collapsed fallback. A run shorter than 15 epochs (the 3-epoch local
+    # default of scripts/physics/runae.sh) clamps this to max_epochs with a
+    # warning. 0 disables the rule.
+    min_trained_epochs: 15
     dataset: normal
     dirpath: '${paths.checkpoints_dir}/${experiment_name}/${run_name}'
     monitor: 'val/loss_total'

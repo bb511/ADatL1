@@ -252,7 +252,7 @@ At the end of stage 1 every run records itself:
 
 ```
 checkpoints/<experiment_name>/<run_name>/
-    loss_total.ckpt          best val/loss_total among epochs whose latent has not collapsed
+    loss_total.ckpt          best val/loss_total among epochs >= 14 (0-based) whose latent has not collapsed
     loss_total_guard.json    per-epoch latent code entropy H(L) and the guard's decision
     run_manifest.yaml        identity, grid point, algorithm fingerprint, mlflow run id
     resolved_config.yaml     the fully resolved config, travelling with the checkpoint
@@ -267,6 +267,23 @@ split (logged as `val/latent_joint_code_entropy_bits`). Epochs with H(L) below
 `loss_total.ckpt`, however low their `val/loss_total`. If every epoch collapsed,
 the best collapsed epoch is kept and `loss_total_guard.json` reports
 `status: no_non_collapsed_epoch`; stage 3's collapse rule then rejects the run.
+
+The same callback also enforces a minimum training length,
+`min_trained_epochs: 15` in `configs/experiment/physics/ae.yaml`. An epoch can
+become `loss_total.ckpt`, or the collapsed fallback, only once the model has trained
+at least 15 epochs, i.e. from the 0-based epoch 14 on. Without the rule,
+`val/loss_total` can be lowest right after epoch 0, before the MI term has built
+up, and Pareto-Front-261015 selected epoch 0 in 6 of 18 runs. Earlier epochs are still validated and
+logged, and the report marks them `before_min_epoch: true`. A run configured
+shorter than the minimum, such as the 3-epoch local default of
+`scripts/physics/runae.sh`, clamps it to `max_epochs` with a warning, so only the
+last epoch is eligible. The report records the configured minimum, the effective
+minimum and `first_eligible_epoch`. If training stops before the first eligible
+epoch (`max_steps`, `max_time`), no checkpoint is written and the status is
+`min_trained_epochs_not_reached`. Override with
+`callbacks.loss_total_ckpt.min_trained_epochs=<N>`; 0 disables the rule. Runs
+trained before this change are not guarded, so do not mix them with new runs in
+one study.
 
 The manifest is written after training rather than before, because `ClearRunCheckpointDir`
 wipes the run directory when a fit starts — and because a manifest present is

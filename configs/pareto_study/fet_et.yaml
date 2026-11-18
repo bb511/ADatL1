@@ -98,6 +98,12 @@ search_space:
       - name: bins_scan_gamma_0.8
         mi_gamma: [0.8]
         mi_sensitive_num_bins: [40]
+      # Added 2026-11-17 to Pareto-Front-261015 and its split replicas, trained
+      # with min_trained_epochs: 15 on loss_total.ckpt. Appended last, so the
+      # line order of the earlier points in a full job list is unchanged.
+      - name: bins_scan_gamma_0.001
+        mi_gamma: [0.001]
+        mi_sensitive_num_bins: [40]
 
   # ONE gamma-zero reference per architecture, at the canonical 50 bins
   # (GAMMA_ZERO_BASELINE_BINS in src/evaluation/pareto/baseline.py). Every run,
